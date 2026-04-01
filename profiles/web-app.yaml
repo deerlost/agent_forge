@@ -1,0 +1,23 @@
+name: web-app
+description: Full-stack web application (Vue 3 + FastAPI/Spring Boot)
+
+generators:
+  - ui
+  - api
+
+reviewers:
+  - ui_reviewer
+  - api_reviewer
+
+evaluator_strategies:
+  - playwright
+  - api_test
+
+templates:
+  - vue3
+  - fastapi
+
+sprint_types:
+  - frontend
+  - backend
+  - fullstack
