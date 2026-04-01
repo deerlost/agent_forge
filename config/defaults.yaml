@@ -1,0 +1,20 @@
+defaults:
+  max_sprint_retries: 3
+  max_reviewer_rounds: 5
+  context_reset_strategy: "full"
+  agent_timeout_minutes: 30
+  sprint_timeout_minutes: 60
+  total_timeout_hours: 8
+
+  human_checkpoints:
+    after_analysis: true
+    after_planning: true
+    sprint_interval: 0
+    after_final_qa: true
+
+  requirement_review:
+    enabled: false
+
+  cost:
+    max_total_cost: 200
+    warn_threshold: 150

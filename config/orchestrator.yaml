@@ -1,0 +1,18 @@
+orchestrator:
+  max_sprint_retries: 3
+  max_reviewer_rounds: 5
+  context_reset_strategy: "full"
+
+human_checkpoints:
+  after_analysis: true
+  after_planning: true
+  sprint_interval: 0
+  after_final_qa: true
+
+requirement_review:
+  enabled: false
+
+timeouts:
+  agent_max_minutes: 30
+  sprint_max_minutes: 60
+  total_max_hours: 8
