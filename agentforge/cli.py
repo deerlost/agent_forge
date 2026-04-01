@@ -9,6 +9,7 @@ from agentforge.core.config import load_config
 from agentforge.core.checkpoint import CheckpointManager
 from agentforge.core.cost_tracker import CostTracker
 from agentforge.core.orchestrator import Orchestrator
+from agentforge.core.profile import load_profile
 
 
 def setup_logging(verbose: bool = False):
@@ -48,7 +49,16 @@ def run(prd, profile, backend, auto, config_dir, output_dir, verbose):
     click.echo(f"PRD: {prd}")
     click.echo(f"Output: {project_output}")
     click.echo()
-    orch = Orchestrator(config=config, output_dir=project_output, prd_path=prd, auto_mode=auto)
+    profiles_dir = Path("profiles")
+    templates_dir = Path("templates")
+    orch = Orchestrator(
+        config=config,
+        output_dir=project_output,
+        prd_path=prd,
+        auto_mode=auto,
+        profiles_dir=profiles_dir if profiles_dir.exists() else None,
+        templates_dir=templates_dir if templates_dir.exists() else None,
+    )
     orch.run()
 
 
@@ -124,7 +134,8 @@ def cost(project, output_dir):
 
 
 @main.command()
-def profiles():
+@click.option("--details", is_flag=True, help="Show profile details")
+def profiles(details):
     """List available service profiles."""
     profiles_dir = Path("profiles")
     if not profiles_dir.exists():
@@ -132,7 +143,19 @@ def profiles():
         return
     click.echo("Available profiles:")
     for f in sorted(profiles_dir.glob("*.yaml")):
-        click.echo(f"  - {f.stem}")
+        name = f.stem
+        if details:
+            try:
+                profile = load_profile(name, profiles_dir)
+                click.echo(f"\n  {name}: {profile.description}")
+                click.echo(f"    Generators: {', '.join(profile.generators)}")
+                click.echo(f"    Reviewers:  {', '.join(profile.reviewers)}")
+                click.echo(f"    Templates:  {', '.join(profile.templates)}")
+                click.echo(f"    Sprint types: {', '.join(profile.sprint_types)}")
+            except Exception:
+                click.echo(f"  - {name} (error loading)")
+        else:
+            click.echo(f"  - {name}")
 
 
 if __name__ == "__main__":

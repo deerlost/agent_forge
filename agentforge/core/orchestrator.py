@@ -9,6 +9,8 @@ from agentforge.core.config import AppConfig
 from agentforge.core.context_manager import ContextManager
 from agentforge.core.cost_tracker import CostTracker
 from agentforge.core.human_gate import GateType, HumanGate
+from agentforge.core.profile import Profile, load_profile, load_profiles_from_string, merge_profiles
+from agentforge.core.template_copier import TemplateCopier
 from agentforge.models.agent import AgentResult
 from agentforge.models.state import Checkpoint, OrchestratorState
 
@@ -16,7 +18,15 @@ logger = logging.getLogger(__name__)
 
 
 class Orchestrator:
-    def __init__(self, config: AppConfig, output_dir: Path, prd_path: str, auto_mode: bool = False):
+    def __init__(
+        self,
+        config: AppConfig,
+        output_dir: Path,
+        prd_path: str,
+        auto_mode: bool = False,
+        profiles_dir: Optional[Path] = None,
+        templates_dir: Optional[Path] = None,
+    ):
         self.config = config
         self.output_dir = Path(output_dir)
         self.prd_path = prd_path
@@ -36,6 +46,25 @@ class Orchestrator:
         self.cost_tracker = CostTracker(self.state_dir, max_cost=config.cost.max_total_cost, warn_threshold=config.cost.warn_threshold)
         self.human_gate = HumanGate(config.human_checkpoints, auto_mode=auto_mode)
         self.context_mgr = ContextManager(self.state_dir)
+
+        # Load profile and copy templates
+        self.profile: Optional[Profile] = None
+        if profiles_dir and config.profile:
+            try:
+                profile_names = config.profile
+                if "," in profile_names:
+                    profiles = load_profiles_from_string(profile_names, profiles_dir)
+                    self.profile = merge_profiles(profiles)
+                else:
+                    self.profile = load_profile(profile_names, profiles_dir)
+                logger.info(f"Loaded profile: {self.profile.name}")
+            except FileNotFoundError:
+                logger.warning(f"Profile '{config.profile}' not found in {profiles_dir}")
+
+        if templates_dir and self.profile:
+            copier = TemplateCopier(templates_dir)
+            copier.copy_templates(self.profile.templates, self.workspace_dir)
+            logger.info(f"Templates copied to workspace")
 
         # Runtime state
         self.plan: Optional[dict] = None
