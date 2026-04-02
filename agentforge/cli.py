@@ -65,6 +65,74 @@ def run(prd, profile, backend, auto, config_dir, output_dir, verbose):
 
 
 @main.command()
+@click.option("--prd", required=True, type=click.Path(exists=True), help="Path to PRD document")
+@click.option("--config-dir", default="config", type=click.Path(), help="Config directory")
+@click.option("--output-dir", default="output", type=click.Path(), help="Output directory")
+@click.option("-v", "--verbose", is_flag=True, help="Verbose logging")
+def analyze(prd, config_dir, output_dir, verbose):
+    """Run requirement analysis only (no code generation)."""
+    setup_logging(verbose)
+    config = load_config(Path(config_dir))
+    if not config.project_name:
+        config.project_name = Path(prd).stem
+    project_output = Path(output_dir) / config.project_name
+
+    click.echo(f"Analyzing PRD: {prd}")
+    orch = Orchestrator(config=config, output_dir=project_output, prd_path=prd, auto_mode=True)
+    orch._run_analysis()
+
+    spec_path = project_output / "state" / "requirement_spec.json"
+    if spec_path.exists():
+        spec = json.loads(spec_path.read_text(encoding="utf-8"))
+        modules = spec.get("modules", [])
+        features = sum(len(m.get("features", [])) for m in modules)
+        ambiguities = spec.get("ambiguities", [])
+        click.echo(f"\nAnalysis complete:")
+        click.echo(f"  Project: {spec.get('project_name', 'N/A')}")
+        click.echo(f"  Modules: {len(modules)}")
+        click.echo(f"  Features: {features}")
+        click.echo(f"  Ambiguities: {len(ambiguities)}")
+        click.echo(f"\nOutput: {spec_path}")
+    else:
+        click.echo("Analysis failed - no output generated.")
+
+
+@main.command()
+@click.option("--prd", required=True, type=click.Path(exists=True), help="Path to PRD document")
+@click.option("--profile", default="web-app", help="Service profile name")
+@click.option("--config-dir", default="config", type=click.Path(), help="Config directory")
+@click.option("--output-dir", default="output", type=click.Path(), help="Output directory")
+@click.option("-v", "--verbose", is_flag=True, help="Verbose logging")
+def plan(prd, profile, config_dir, output_dir, verbose):
+    """Run analysis + planning only (no code generation)."""
+    setup_logging(verbose)
+    config = load_config(Path(config_dir))
+    config.profile = profile
+    if not config.project_name:
+        config.project_name = Path(prd).stem
+    project_output = Path(output_dir) / config.project_name
+
+    click.echo(f"Analyzing and planning: {prd}")
+    orch = Orchestrator(config=config, output_dir=project_output, prd_path=prd, auto_mode=True)
+    orch._run_analysis()
+    if orch.state in (orch.state.PLANNING, orch.state.REVIEWING_REQ):
+        orch._run_planning()
+
+    plan_path = project_output / "state" / "plan.json"
+    if plan_path.exists():
+        plan_data = json.loads(plan_path.read_text(encoding="utf-8"))
+        sprints = plan_data.get("sprints", [])
+        apis = plan_data.get("api_contract", [])
+        click.echo(f"\nPlanning complete:")
+        click.echo(f"  Tech stack: {plan_data.get('tech_stack', {})}")
+        click.echo(f"  Sprints: {len(sprints)}")
+        click.echo(f"  API endpoints: {len(apis)}")
+        click.echo(f"\nOutput: {plan_path}")
+    else:
+        click.echo("Planning failed - no output generated.")
+
+
+@main.command()
 @click.option("--project", required=True, help="Project name to resume")
 @click.option("--output-dir", default="output", type=click.Path(), help="Output directory")
 @click.option("--config-dir", default="config", type=click.Path(), help="Config directory")
