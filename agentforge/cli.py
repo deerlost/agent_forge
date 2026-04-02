@@ -10,6 +10,8 @@ from agentforge.core.checkpoint import CheckpointManager
 from agentforge.core.cost_tracker import CostTracker
 from agentforge.core.orchestrator import Orchestrator
 from agentforge.core.profile import load_profile
+from agentforge.learning.analyzer import Analyzer
+from agentforge.learning.knowledge_base import KnowledgeBase
 
 
 def setup_logging(verbose: bool = False):
@@ -156,6 +158,31 @@ def profiles(details):
                 click.echo(f"  - {name} (error loading)")
         else:
             click.echo(f"  - {name}")
+
+
+@main.command()
+@click.option("--analyze", is_flag=True, help="Run cross-project trend analysis")
+@click.option("--knowledge-dir", default="knowledge", type=click.Path(), help="Knowledge directory")
+def learn(analyze, knowledge_dir):
+    """View or analyze learned knowledge from past runs."""
+    kdir = Path(knowledge_dir)
+    if not kdir.exists():
+        click.echo("No knowledge directory found. Run projects first to build knowledge.")
+        return
+
+    kb = KnowledgeBase(kdir)
+    patterns = kb.get_patterns()
+    antipatterns = kb.get_antipatterns()
+
+    click.echo(f"Knowledge Base Summary")
+    click.echo(f"{'='*40}")
+    click.echo(f"Patterns: {len(patterns)}")
+    click.echo(f"Anti-patterns: {len(antipatterns)}")
+
+    if analyze:
+        click.echo()
+        analyzer = Analyzer(kdir)
+        click.echo(analyzer.format_report())
 
 
 if __name__ == "__main__":

@@ -11,6 +11,9 @@ from agentforge.core.cost_tracker import CostTracker
 from agentforge.core.human_gate import GateType, HumanGate
 from agentforge.core.profile import Profile, load_profile, load_profiles_from_string, merge_profiles
 from agentforge.core.template_copier import TemplateCopier
+from agentforge.learning.extractor import Extractor
+from agentforge.learning.injector import KnowledgeInjector
+from agentforge.learning.knowledge_base import KnowledgeBase, Pattern, AntiPattern
 from agentforge.models.agent import AgentResult
 from agentforge.models.state import Checkpoint, OrchestratorState
 
@@ -26,6 +29,7 @@ class Orchestrator:
         auto_mode: bool = False,
         profiles_dir: Optional[Path] = None,
         templates_dir: Optional[Path] = None,
+        knowledge_dir: Optional[Path] = None,
     ):
         self.config = config
         self.output_dir = Path(output_dir)
@@ -65,6 +69,15 @@ class Orchestrator:
             copier = TemplateCopier(templates_dir)
             copier.copy_templates(self.profile.templates, self.workspace_dir)
             logger.info(f"Templates copied to workspace")
+
+        # Learning engine
+        self.knowledge_base: Optional[KnowledgeBase] = None
+        self.injector: Optional[KnowledgeInjector] = None
+        self.extractor = Extractor()
+        if knowledge_dir:
+            self.knowledge_base = KnowledgeBase(knowledge_dir)
+            self.injector = KnowledgeInjector(self.knowledge_base)
+            logger.info(f"Learning engine initialized from {knowledge_dir}")
 
         # Runtime state
         self.plan: Optional[dict] = None
@@ -123,6 +136,16 @@ class Orchestrator:
             prompt_path = Path(agent_config.prompt_file)
             if prompt_path.exists():
                 system_prompt = prompt_path.read_text(encoding="utf-8")
+
+        # Inject learned experience into system prompt
+        if self.injector and system_prompt:
+            agent_short = agent_key.split(".")[-1]  # "generators.ui" -> "ui"
+            experience = self.injector.inject(
+                agent=agent_short,
+                profile=self.config.profile,
+            )
+            if experience:
+                system_prompt = system_prompt + "\n\n" + experience
 
         result = self.cli_executor.run_agent(
             prompt=prompt,
@@ -335,4 +358,44 @@ class Orchestrator:
         if self.human_gate.should_pause(GateType.AFTER_FINAL_QA):
             self.human_gate.wait_for_human(GateType.AFTER_FINAL_QA, context={"qa_passed": result.is_success})
 
+        # Extract and persist learned experience
+        self._extract_learning()
+
         self._transition(OrchestratorState.COMPLETED)
+
+    def _extract_learning(self) -> None:
+        """Extract patterns/antipatterns from this run and save to knowledge base."""
+        if not self.knowledge_base:
+            return
+
+        try:
+            result = self.extractor.extract(self.state_dir, profile=self.config.profile)
+
+            for p_data in result.get("patterns", []):
+                self.knowledge_base.add_pattern(Pattern.model_validate(p_data))
+
+            for ap_data in result.get("antipatterns", []):
+                self.knowledge_base.add_antipattern(AntiPattern.model_validate(ap_data))
+
+            # Save project history for cross-project analysis
+            history_dir = self.knowledge_base.knowledge_dir / "project_history"
+            history_dir.mkdir(parents=True, exist_ok=True)
+            cost_summary = self.cost_tracker.get_summary()
+            history = {
+                "project_name": self.config.project_name,
+                "profile": self.config.profile,
+                "total_cost": cost_summary.get("total_cost", 0),
+                "total_sprints": len(self.checkpoint_mgr.load().completed_sprints) if self.checkpoint_mgr.load() else 0,
+                "patterns_extracted": len(result.get("patterns", [])),
+                "antipatterns_extracted": len(result.get("antipatterns", [])),
+            }
+            history_path = history_dir / f"{self.config.project_name}.json"
+            history_path.write_text(
+                json.dumps(history, indent=2, ensure_ascii=False), encoding="utf-8"
+            )
+            logger.info(
+                f"Learning extracted: {len(result.get('patterns', []))} patterns, "
+                f"{len(result.get('antipatterns', []))} antipatterns"
+            )
+        except Exception as e:
+            logger.warning(f"Failed to extract learning: {e}")

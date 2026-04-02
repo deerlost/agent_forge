@@ -1,0 +1,18 @@
+learning:
+  enabled: true
+  auto_extract: true
+  auto_inject: true
+
+  extraction:
+    min_frequency: 2
+    max_patterns: 50
+    max_antipatterns: 30
+
+  injection:
+    top_k_patterns: 10
+    top_k_antipatterns: 10
+    max_prompt_addition: 800
+
+  retention:
+    pattern_decay_days: 180
+    project_history_keep: 50
