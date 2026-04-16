@@ -5,23 +5,25 @@ agents:
   analyst:
     engine: claude-cli
     model: opus
-    max_turns: 20
-    timeout_minutes: 15
+    max_turns: 50
+    timeout_minutes: 30
     allowed_tools:
       - Read
       - Write
       - Glob
+      - Bash
     prompt_file: agents/analyst/prompts/system.md
 
   planner:
     engine: claude-cli
     model: opus
-    max_turns: 30
-    timeout_minutes: 20
+    max_turns: 50
+    timeout_minutes: 30
     allowed_tools:
       - Read
       - Write
       - Grep
+      - Bash
     prompt_file: agents/planner/prompts/system.md
 
   generators:
@@ -29,7 +31,7 @@ agents:
       engine: claude-cli
       model: sonnet
       max_turns: 100
-      timeout_minutes: 30
+      timeout_minutes: 60
       allowed_tools:
         - Read
         - Write
@@ -43,7 +45,7 @@ agents:
       engine: claude-cli
       model: sonnet
       max_turns: 100
-      timeout_minutes: 30
+      timeout_minutes: 60
       allowed_tools:
         - Read
         - Write

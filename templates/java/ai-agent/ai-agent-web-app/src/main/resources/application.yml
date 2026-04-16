@@ -1,0 +1,84 @@
+auto:
+  application:
+    default-version:
+      - v1
+      - v2
+      - v3
+    interceptor:
+      sign-verify:
+        path-patterns:
+          - /v**/openId/**
+    response:
+      data:
+        successCode: 200
+
+
+spring:
+  application:
+    name: ai-agent-web
+
+#数据库配置
+  datasource:
+    # url常用参数说明（有兴趣的可以看下官方文档：https://dev.mysql.com/doc/connector-j/8.0/en/connector-j-reference-configuration-properties.html）
+    #     useUnicode：是否使用Unicode字符集
+    #     characterEncoding: 当useUnicode=true时指定字符编码
+    #     allowMultiQueries: 当等于true时
+    #           1.可以在sql语句后携带分号，实现多语句执行
+    #     connectTimeout: 和数据库服务器建立socket连接时的超时，单位：毫秒。 0表示永不超时
+    #     socketTimeout: socket操作（读写）超时，单位：毫秒。 0表示永不超时
+    url: jdbc:mysql://172.31.3.210:3307/weiwang_test?useUnicode=true&characterEncoding=utf-8&allowMultiQueries=true&connectTimeout=6000&socketTimeout=6000
+    username: iflyauto
+    password: Kzw87vv2XLWsOwEN
+    # hikari官方参考文档：https://github.com/brettwooldridge/HikariCP#gear-configuration-knobs-baby
+    # 常用参数配置：
+    #     connectionTimeout：等待来自池的连接的最大毫秒数，默认30000【如果小于250毫秒，则被重置回30秒】，建议比上面url中connectTimeout稍大，比如10s
+    #     idleTimeout：连接允许在池中闲置的最长时间，默认600000【如果idleTimeout+1秒 > maxLifetime 且 maxLifetime > 0，则会被重置为0（代表永远不会退出）；如果idleTimeout != 0且小于10秒，则会被重置为10秒】
+    #     maxLifetime：池中连接最长生命周期，默认1800000【如果不等于0且小于30秒则会被重置回30分钟】，建议比数据库的默认时间小几秒中且不要设置为0
+    #     minimumIdle：池中维护的最小空闲连接数，默认等于maximumPoolSize【minIdle < 0或者 minIdle > maxPoolSize，则被重置为maxPoolSize】
+    #     maximumPoolSize：池中最大连接数，包括闲置和使用中的连接，默认10【如果maxPoolSize < 1，则会被重置。当minIdle <= 0被重置为DEFAULT_POOL_SIZE则为10；如果minIdle > 0则重置为minIdle的值】，为了获得更好的性能和峰值需求的响应，建议不设置minimumIdle，这样允许hikariCP充当固定大小的连接池
+    # 注意事项：
+    #     1、如果系统中同时混合了长事务和短事务，建议创建两个连接池，一个用于长事务，一个用于短事务（实时查询）
+    hikari:
+      max-lifetime: 1500000
+      # 为了获得更好的性能和峰值需求的响应，建议不设置minimumIdle，这样允许hikariCP充当固定大小的连接池
+      # 参考公式：((core_count * 2) + effective_spindle_count)：core_count-CPU核心数量，effective_spindle_count-有效磁盘数
+      # 实际需要测试模拟预期的访问量，并通过上面的公式先设置一个偏合理的值，然后在实际的测试中，通过微调，来寻找最合适的连接数大小
+      maximum-pool-size: 20
+      # 设置当前会话（连接）的字符集编码，在与数据库建立连接后执行，执行完之后将连接放入池中
+      connection-init-sql: set names utf8mb4;
+
+# redis配置
+  redis:
+    #现网建议用0，在其他环境中根据自己的业务来进行配置
+    database: 0
+    #单机配置
+#    host: 127.0.0.1
+#    port: 6379
+    password: Iflytek!@#Chezai2018
+    timeout: 180000   #连接超时时间
+    #集群配置
+    cluster:
+#    多个ip中间以,分割
+      nodes: 172.31.3.18:26379,172.31.3.31:26379,172.31.3.33:26379
+      max-redirects: 3
+    lettuce:
+      pool:
+        # 连接池中的最大空闲连接 默认8
+        max-idle: 100
+        # 连接池中的最小空闲连接 默认0
+        min-idle: 0
+        # 连接池最大连接数 默认8 ，负数表示没有限制
+        max-active: 3000
+        # 连接池最大阻塞等待时间（使用负值表示没有限制） 默认-1
+        max-wait: 1000
+
+
+
+mybatis-plus:
+# mapper.xml位置
+mapper-locations: classpath*:/mapper/**/*Mapper.xml
+configuration:
+# 调试时可在本地输出SQL日志
+log-impl: org.apache.ibatis.logging.stdout.StdOutImpl
+
+

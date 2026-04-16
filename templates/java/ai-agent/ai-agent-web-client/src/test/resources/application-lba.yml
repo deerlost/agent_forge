@@ -1,0 +1,19 @@
+auto:
+  service:
+    ai-agent-web:
+      enable-load-balance: true
+      mode: http
+
+spring:
+  application:
+    name: ai-agent-web-client
+  cloud:
+    nacos:
+      server-addr: ${nacos.server-addr:172.31.87.134:8848}
+      password: ${nacos.password:App1234!@#$}
+      discovery:
+        namespace: ${nacos.discovery.ns:auto-rpc}
+        group: ${nacos.discovery.group:default}
+        server-addr: ${nacos.discovery.server-addr:${spring.cloud.nacos.server-addr}}
+        username: ${nacos.discovery.username:${spring.cloud.nacos.username:auto-rpc-client}}
+        password: ${nacos.discovery.password:${spring.cloud.nacos.password}}

@@ -38,6 +38,8 @@ class AppConfig(BaseModel):
     profile: str = ""
     domain_prompt: Optional[str] = None
     default_engine: str = "claude-cli"
+    knowledge_dir: Optional[str] = None
+    output_dir: Optional[str] = None
     orchestrator: OrchestratorConfig = Field(default_factory=OrchestratorConfig)
     human_checkpoints: HumanCheckpointsConfig = Field(default_factory=HumanCheckpointsConfig)
     requirement_review: RequirementReviewConfig = Field(default_factory=RequirementReviewConfig)
@@ -100,6 +102,8 @@ def load_config(config_dir: Path, project_config_path: Optional[Path] = None) ->
         project_info = project_data.get("project", {})
         merged["project_name"] = project_info.get("name", "")
         merged["domain_prompt"] = project_info.get("domain_prompt")
+        merged["knowledge_dir"] = project_info.get("knowledge_dir")
+        merged["output_dir"] = project_info.get("output_dir")
         merged["profile"] = project_data.get("profile", "")
         if "orchestrator" in project_data:
             orch_override = project_data["orchestrator"]

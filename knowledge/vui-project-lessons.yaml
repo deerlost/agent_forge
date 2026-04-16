@@ -1,0 +1,92 @@
+# VUI 项目代码生成踩坑总结 — 2026-04-16
+# 导入命令: agentforge import-rules knowledge/vui-project-lessons.yaml --profile web-app
+
+patterns:
+  # 架构设计传递
+  - pattern: "plan.md 中的工程结构（DDD/分层/包名）必须原文传递给 Generator，不能只传 Sprint 粗粒度信息"
+    agent: api
+  - pattern: "MD→JSON 转换时必须保留架构约束（分层规则、聚合定义、领域事件流），不能只保留功能列表"
+    agent: api
+  - pattern: "Generator 的 system prompt 中必须包含目标项目的包名前缀（如 com.iflytek.auto.vui），不能用默认包名"
+    agent: api
+
+  # DDD 相关
+  - pattern: "DDD 项目 domain 层必须纯 POJO，不依赖 Spring/MyBatis/Redis 注解"
+    agent: api
+  - pattern: "Repository 接口定义在 domain 层，实现在 infrastructure 层，这是 DDD 的依赖反转核心"
+    agent: api
+  - pattern: "DO 和 Domain Model 必须分离，通过 Converter 转换，不能混用"
+    agent: api
+  - pattern: "按聚合划分包结构（domain/vui/, domain/function/, domain/interaction/, domain/publish/），不能扁平化"
+    agent: api
+
+  # 多模块 Maven
+  - pattern: "Java 多模块项目用 parent POM 管理版本，子模块不写版本号"
+    agent: api
+  - pattern: "api 模块只放 DTO/Enum/Feign 接口，不放业务代码"
+    agent: api
+
+  # 并行生成
+  - pattern: "DDD 四层可以并行生成：domain/application/infrastructure/interfaces 各派一个子智能体"
+    agent: api
+  - pattern: "并行生成时每个子智能体必须知道完整的包名和聚合定义，不能假设其他层已存在"
+    agent: api
+
+antipatterns:
+  # 架构偏离
+  - antipattern: "Generator 生成扁平 MVC 结构（controller/service/mapper）而非 plan 要求的 DDD 四层"
+    fix: "将 plan.md 的完整工程结构定义作为 Generator system prompt 的一部分传入，不能只传 Sprint Contract"
+    agent: api
+  - antipattern: "MD→JSON 转换丢失 DDD 结构细节，JSON 里只有 Sprint 列表没有架构约束"
+    fix: "转换时保留 tech_stack.architecture 字段，或将 plan.md 原文作为 append_prompt 传给 Generator"
+    agent: api
+  - antipattern: "使用默认包名（com.vui.app）而非 plan 指定的包名（com.iflytek.auto.vui）"
+    fix: "从 plan.json 的 tech_stack 或 project_structure 字段读取包名，注入到 Generator prompt"
+    agent: api
+
+  # 框架层问题
+  - antipattern: "system prompt 通过 --system-prompt CLI 参数传入，Windows 下命令行长度限制导致参数截断"
+    fix: "改用 stdin（-p -）传入合并后的 prompt，避免命令行长度限制"
+    agent: api
+  - antipattern: "subprocess.run 不指定 encoding='utf-8'，Windows 默认 GBK 导致中文乱码"
+    fix: "始终传 encoding='utf-8', errors='replace'"
+    agent: api
+  - antipattern: "Claude CLI 返回的 cost 字段名是 total_cost_usd，框架用 cost 解析，导致成本始终为 0"
+    fix: "解析时用 data.get('total_cost_usd', data.get('cost', 0.0))"
+    agent: api
+  - antipattern: "Agent 的 prompt_file 路径是相对路径，删除本地副本后找不到 prompt 文件"
+    fix: "通过 resource resolver 自动 fallback 到安装目录查找 prompt 文件"
+    agent: api
+  - antipattern: "checkpoint 状态为 PAUSED/BLOCKED 后 run() 方法没有匹配的 if 分支，直接跳过"
+    fix: "在 run() 开头处理 PAUSED/BLOCKED → 重置 failed_attempts → 回到 SPRINTING 状态"
+    agent: api
+  - antipattern: "Generator timeout 设为 30 分钟，前端项目 npm install + 代码生成超时"
+    fix: "Generator timeout 至少 60 分钟，大型项目可能需要更长"
+    agent: api
+  - antipattern: "Analyst/Planner 的 allowedTools 里没有 Bash，Agent 用 18 轮尝试调 Bash 被拒"
+    fix: "所有 Agent 默认包含 Bash 工具权限"
+    agent: api
+
+  # 状态管理
+  - antipattern: "Evaluator 通过后没有正确调用 complete_sprint，导致 completed_sprints 为空"
+    fix: "确保 Evaluator 返回后无论 is_success 如何都检查并更新 sprint 完成状态"
+    agent: api
+  - antipattern: "空目录被 resource resolver 当作有效资源，导致加载了空的 config/agents"
+    fix: "检查目录内是否有文件（any(dir.iterdir())），空目录跳过"
+    agent: api
+  - antipattern: "MD→JSON 转换产出无效 JSON（语法错误），框架不重试直接放弃"
+    fix: "转换后校验 JSON 合法性，失败则让 Agent 修复，最多重试 3 次"
+    agent: api
+
+  # 文件命名
+  - antipattern: "PRD 文件名使用中文（如 VUI系统.pdf），bash 环境下路径被 GBK 编码截断"
+    fix: "文件名用英文（VUI.pdf），项目名在 agentforge.yaml 中用中文"
+    agent: api
+
+  # 用户体验
+  - antipattern: "在 Claude Code 会话里说'运行 agentforge'，Claude 自己充当 Agent 而非调 subprocess"
+    fix: "必须在独立终端或用 ! 前缀执行 CLI 命令"
+    agent: api
+  - antipattern: "每个项目都要复制 config/agents/templates 目录到本地"
+    fix: "使用 resource fallback 机制，自动从安装目录加载默认资源，本地只放覆盖项"
+    agent: api

@@ -1,0 +1,41 @@
+# AgentForge 框架自身踩过的坑 — 2026-04-15
+# 导入命令: agentforge import-rules knowledge/agentforge-lessons.yaml --profile web-app
+
+patterns:
+  - pattern: "Agent prompt 中必须使用绝对路径指定输入文件和输出目录"
+    agent: api
+  - pattern: "PDF 文件读取需要更多轮次（max_turns >= 50），因为 Read 工具分页读取"
+    agent: api
+  - pattern: "CLI Executor 应自动搜索 claude 可执行文件路径，不依赖 PATH 环境变量"
+    agent: api
+  - pattern: "框架资源（config/agents/templates）应从安装目录自动加载，用户项目只放覆盖项"
+    agent: api
+  - pattern: "subprocess 调用 Claude CLI 时必须显式指定 encoding=utf-8 和 errors=replace"
+    agent: api
+  - pattern: "PRD 文件名和项目名避免使用中文，用英文或拼音命名避免跨平台编码问题"
+    agent: api
+  - pattern: "空目录不应被 resource resolver 视为有效资源目录，必须检查目录内有文件"
+    agent: api
+
+antipatterns:
+  - antipattern: "在 Claude Code 会话里让 Claude 执行 agentforge 命令"
+    fix: "必须在独立终端或用 ! 前缀执行，否则 Claude 自己充当 Agent 而非调 subprocess"
+    agent: api
+  - antipattern: "Agent prompt 中使用相对路径指定文件位置"
+    fix: "使用 Path.resolve() 转为绝对路径传给 Agent，避免工作目录混淆"
+    agent: api
+  - antipattern: "checkpoint 状态为 BLOCKED 后反复重试不清除"
+    fix: "提示用户删除 checkpoint.json 重新开始，或添加 --force 参数自动清除"
+    agent: api
+  - antipattern: "将框架配置文件复制到每个项目目录"
+    fix: "使用 resource fallback 机制，自动从安装目录加载默认资源"
+    agent: api
+  - antipattern: "PRD 文件名使用中文字符（如 VUI系统.pdf）"
+    fix: "Windows bash 环境下中文路径会被 GBK/UTF-8 编码截断，导致文件找不到。改用英文命名（如 VUI.pdf）"
+    agent: api
+  - antipattern: "subprocess.run 不指定 encoding 参数"
+    fix: "Windows 默认用 GBK 编码读取 stdout，中文内容会报 UnicodeDecodeError。必须加 encoding='utf-8', errors='replace'"
+    agent: api
+  - antipattern: "resource resolver 把空目录当作有效资源"
+    fix: "检查目录内是否有文件（any(dir.iterdir())），空目录应跳过继续 fallback"
+    agent: api

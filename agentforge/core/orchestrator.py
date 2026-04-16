@@ -117,6 +117,117 @@ class Orchestrator:
                 self.key_decisions = handoff.get("key_decisions", [])
                 self.known_issues = handoff.get("known_issues", [])
 
+    def _find_existing_state_file(self, name: str) -> Optional[Path]:
+        """Search for existing state file. JSON preferred over MD."""
+        search_dirs = [
+            self.state_dir,                           # output/{project}/state/
+            Path.cwd() / "state",                     # {cwd}/state/ (user-created)
+        ]
+        # JSON first (structured, framework can parse)
+        for d in search_dirs:
+            candidate = d / f"{name}.json"
+            if candidate.exists() and candidate.stat().st_size > 0:
+                return candidate
+        # MD fallback (needs conversion)
+        for d in search_dirs:
+            candidate = d / f"{name}.md"
+            if candidate.exists() and candidate.stat().st_size > 0:
+                return candidate
+        return None
+
+    def _load_state_file(self, path: Path) -> Optional[dict]:
+        """Load a state file. JSON parsed directly; MD triggers Agent conversion."""
+        content = path.read_text(encoding="utf-8")
+        if path.suffix == ".json":
+            try:
+                return json.loads(content)
+            except json.JSONDecodeError:
+                logger.warning(f"Failed to parse JSON: {path}")
+                return None
+        elif path.suffix == ".md":
+            # MD file found — need to convert to JSON via Agent
+            return self._convert_md_to_json(path)
+        return None
+
+    def _convert_md_to_json(self, md_path: Path) -> Optional[dict]:
+        """Use Agent to convert an existing MD state file to JSON. Retries on invalid JSON."""
+        md_abs = str(md_path.resolve())
+        name = md_path.stem  # "requirement_spec" or "plan"
+        json_path = self.state_dir / f"{name}.json"
+        state_abs = str(self.state_dir.resolve())
+
+        for attempt in range(3):
+            if attempt == 0:
+                logger.info(f"Converting {md_path.name} to JSON format...")
+                prompt = (
+                    f"Read the existing document at: {md_abs}\n\n"
+                    f"Convert its content into valid JSON and write to: {state_abs}/{name}.json\n\n"
+                    f"CRITICAL: Output must be valid JSON. Verify there are no trailing commas, "
+                    f"unescaped quotes in strings, or missing delimiters. "
+                    f"Keep ALL information from the original document."
+                )
+            else:
+                # Read the broken JSON and ask Agent to fix it
+                broken = json_path.read_text(encoding="utf-8") if json_path.exists() else ""
+                logger.info(f"Fixing invalid JSON (attempt {attempt + 1})...")
+                prompt = (
+                    f"The file at {state_abs}/{name}.json contains invalid JSON. "
+                    f"Fix it and overwrite the file. The JSON parse error was: {last_error}\n\n"
+                    f"Read the file, fix the JSON syntax error, and write the corrected version back."
+                )
+
+            self._run_agent(
+                agent_key="analyst" if "requirement" in name else "planner",
+                prompt=prompt,
+            )
+
+            if json_path.exists():
+                try:
+                    data = json.loads(json_path.read_text(encoding="utf-8"))
+                    logger.info(f"Successfully converted {md_path.name} -> {name}.json")
+                    return data
+                except json.JSONDecodeError as e:
+                    last_error = str(e)
+                    logger.warning(f"Invalid JSON (attempt {attempt + 1}): {last_error}")
+
+        logger.error(f"Failed to convert {md_path.name} to valid JSON after 3 attempts")
+        return None
+
+    def _generate_md_from_json(self, json_path: Path) -> None:
+        """Generate a human-readable MD file from a JSON state file."""
+        md_path = json_path.with_suffix(".md")
+        if md_path.exists():
+            return  # Don't overwrite existing MD
+
+        try:
+            data = json.loads(json_path.read_text(encoding="utf-8"))
+        except (json.JSONDecodeError, FileNotFoundError):
+            return
+
+        name = json_path.stem
+        lines = [f"# {data.get('project_name', name)}\n"]
+
+        if name == "requirement_spec":
+            for module in data.get("modules", []):
+                lines.append(f"\n## {module.get('id', '')} - {module.get('name', '')} [{module.get('priority', '')}]\n")
+                for feat in module.get("features", []):
+                    lines.append(f"### {feat.get('id', '')} - {feat.get('description', '')}")
+                    for ac in feat.get("acceptance_criteria", []):
+                        lines.append(f"- {ac}")
+
+        elif name == "plan":
+            lines.append(f"\n## Tech Stack\n")
+            for k, v in data.get("tech_stack", {}).items():
+                lines.append(f"- **{k}**: {v}")
+            lines.append(f"\n## Sprints\n")
+            for sprint in data.get("sprints", []):
+                lines.append(f"### {sprint.get('id', '')} [{sprint.get('type', '')}] {sprint.get('name', '')}")
+                for c in sprint.get("contract", {}).get("done_criteria", []):
+                    lines.append(f"- [ ] {c}")
+
+        md_path.write_text("\n".join(lines), encoding="utf-8")
+        logger.info(f"Generated {md_path.name} from {json_path.name}")
+
     def _transition(self, new_state: OrchestratorState, **kwargs) -> None:
         logger.info(f"State transition: {self.state.value} -> {new_state.value}")
         self.state = new_state
@@ -133,9 +244,34 @@ class Orchestrator:
         agent_config = self.config.get_agent_config(agent_key)
 
         if system_prompt is None and agent_config.prompt_file:
-            prompt_path = Path(agent_config.prompt_file)
-            if prompt_path.exists():
+            # Try multiple locations for prompt file
+            prompt_path = None
+            candidates = [
+                Path(agent_config.prompt_file),                           # Relative to CWD
+                Path.cwd() / agent_config.prompt_file,                    # Explicit CWD
+            ]
+            # Add install directory path
+            from agentforge.core.resources import resolve_agents_dir
+            agents_dir = resolve_agents_dir()
+            if agents_dir:
+                # prompt_file is like "agents/analyst/prompts/system.md"
+                # agents_dir is like "/path/to/agentforge/agents"
+                # Strip "agents/" prefix and join with agents_dir
+                relative = agent_config.prompt_file
+                if relative.startswith("agents/"):
+                    relative = relative[len("agents/"):]
+                candidates.append(agents_dir / relative)
+
+            for candidate in candidates:
+                if candidate.exists():
+                    prompt_path = candidate
+                    break
+
+            if prompt_path:
                 system_prompt = prompt_path.read_text(encoding="utf-8")
+                logger.debug(f"Loaded system prompt from: {prompt_path}")
+            else:
+                logger.warning(f"System prompt not found: {agent_config.prompt_file}")
 
         # Inject learned experience into system prompt
         if self.injector and system_prompt:
@@ -147,9 +283,17 @@ class Orchestrator:
             if experience:
                 system_prompt = system_prompt + "\n\n" + experience
 
+        # All agents use absolute paths for workspace
+        # Analyst/Planner work at project output root (access state/ + workspace/)
+        # Generators work in workspace/ (where code lives)
+        if agent_key in ("analyst", "planner", "evaluator", "requirement_reviewer"):
+            work_dir = str(self.output_dir.resolve())
+        else:
+            work_dir = str(self.workspace_dir.resolve())
+
         result = self.cli_executor.run_agent(
             prompt=prompt,
-            workspace=str(self.workspace_dir),
+            workspace=work_dir,
             model=agent_config.model,
             allowed_tools=agent_config.allowed_tools,
             max_turns=agent_config.max_turns,
@@ -170,6 +314,18 @@ class Orchestrator:
             logger.info("Project already completed.")
             return
 
+        # Resume from PAUSED/BLOCKED: reset failure counter and return to SPRINTING
+        if self.state in (OrchestratorState.PAUSED, OrchestratorState.BLOCKED):
+            cp = self.checkpoint_mgr.load()
+            logger.info(f"Resuming from {self.state.value} (sprint: {cp.current_sprint}, failures: {cp.failed_attempts})")
+            # Reset failure counter and set back to SPRINTING
+            self.checkpoint_mgr.update(
+                status=OrchestratorState.SPRINTING,
+                failed_attempts=0,
+                error=None,
+            )
+            self.state = OrchestratorState.SPRINTING
+
         if self.state in (OrchestratorState.INIT, OrchestratorState.ANALYZING):
             self._run_analysis()
 
@@ -189,15 +345,32 @@ class Orchestrator:
 
     def _run_analysis(self) -> None:
         self._transition(OrchestratorState.ANALYZING)
-        result = self._run_agent(agent_key="analyst", prompt=f"Analyze the PRD file at: {self.prd_path}")
 
-        if not result.is_success:
-            self.checkpoint_mgr.record_failure(f"Analyst failed: {result.output}")
-            return
+        # Check for existing analysis results (json or md)
+        existing_spec = self._find_existing_state_file("requirement_spec")
+        if existing_spec:
+            logger.info(f"Found existing requirement spec: {existing_spec}")
+            self.requirement_spec = self._load_state_file(existing_spec)
+        else:
+            prd_abs = str(Path(self.prd_path).resolve())
+            state_abs = str(self.state_dir.resolve())
+            prd_suffix = Path(self.prd_path).suffix.lower()
+            file_hint = ""
+            if prd_suffix == ".pdf":
+                file_hint = "\n\nNote: This is a PDF file. Use the Read tool to read it (it supports PDF)."
+            result = self._run_agent(
+                agent_key="analyst",
+                prompt=f"Analyze the PRD file at: {prd_abs}{file_hint}\n\nWrite output to: {state_abs}/requirement_spec.json",
+            )
 
-        spec_path = self.state_dir / "requirement_spec.json"
-        if spec_path.exists():
-            self.requirement_spec = json.loads(spec_path.read_text(encoding="utf-8"))
+            if not result.is_success:
+                self.checkpoint_mgr.record_failure(f"Analyst failed: {result.output}")
+                return
+
+            spec_path = self.state_dir / "requirement_spec.json"
+            if spec_path.exists():
+                self.requirement_spec = json.loads(spec_path.read_text(encoding="utf-8"))
+                self._generate_md_from_json(spec_path)
 
         ambiguities = (self.requirement_spec or {}).get("ambiguities", [])
         human_ambiguities = [a for a in ambiguities if a.get("needs_human")]
@@ -225,15 +398,27 @@ class Orchestrator:
 
     def _run_planning(self) -> None:
         self._transition(OrchestratorState.PLANNING)
-        result = self._run_agent(agent_key="planner", prompt="Create a technical plan based on requirement_spec.json")
 
-        if not result.is_success:
-            self.checkpoint_mgr.record_failure(f"Planner failed: {result.output}")
-            return
+        # Check for existing plan (json or md)
+        existing_plan = self._find_existing_state_file("plan")
+        if existing_plan:
+            logger.info(f"Found existing plan: {existing_plan}")
+            self.plan = self._load_state_file(existing_plan)
+        else:
+            state_abs = str(self.state_dir.resolve())
+            result = self._run_agent(
+                agent_key="planner",
+                prompt=f"Read requirement spec from: {state_abs}/requirement_spec.json\n\nWrite technical plan to: {state_abs}/plan.json",
+            )
 
-        plan_path = self.state_dir / "plan.json"
-        if plan_path.exists():
-            self.plan = json.loads(plan_path.read_text(encoding="utf-8"))
+            if not result.is_success:
+                self.checkpoint_mgr.record_failure(f"Planner failed: {result.output}")
+                return
+
+            plan_path = self.state_dir / "plan.json"
+            if plan_path.exists():
+                self.plan = json.loads(plan_path.read_text(encoding="utf-8"))
+                self._generate_md_from_json(plan_path)
 
         if self.human_gate.should_pause(GateType.AFTER_PLANNING):
             sprint_count = len((self.plan or {}).get("sprints", []))
@@ -312,10 +497,13 @@ class Orchestrator:
         if sprint_type in ("frontend", "fullstack"):
             generators.append(("generators.ui", "ui_reviewer"))
 
+        workspace_abs = str(self.workspace_dir.resolve())
+        state_abs = str(self.state_dir.resolve())
+
         for gen_key, reviewer_key in generators:
             gen_result = self._run_agent(
                 agent_key=gen_key,
-                prompt=f"Implement sprint {sprint_id}: {sprint['name']}",
+                prompt=f"Implement sprint {sprint_id}: {sprint['name']}\n\nWorkspace directory: {workspace_abs}\nState directory: {state_abs}",
                 sprint_id=sprint_id,
                 append_prompt=handoff_prompt,
             )
@@ -326,7 +514,7 @@ class Orchestrator:
             for round_num in range(self.config.orchestrator.max_reviewer_rounds):
                 review_result = self._run_agent(
                     agent_key=f"reviewers.{reviewer_key}",
-                    prompt=f"Review code for sprint {sprint_id}",
+                    prompt=f"Review code for sprint {sprint_id}\n\nWorkspace directory: {workspace_abs}",
                     sprint_id=sprint_id,
                 )
                 if review_result.is_success:
@@ -335,7 +523,7 @@ class Orchestrator:
                 logger.info(f"Review round {round_num + 1} for {reviewer_key}: needs revision")
                 gen_result = self._run_agent(
                     agent_key=gen_key,
-                    prompt=f"Fix issues from review for sprint {sprint_id}:\n{review_result.output}",
+                    prompt=f"Fix issues from review for sprint {sprint_id}:\n{review_result.output}\n\nWorkspace directory: {workspace_abs}",
                     sprint_id=sprint_id,
                     append_prompt=handoff_prompt,
                 )
@@ -347,7 +535,12 @@ class Orchestrator:
 
     def _run_final_qa(self) -> None:
         self._transition(OrchestratorState.FINAL_QA)
-        result = self._run_agent(agent_key="evaluator", prompt="Run full application QA")
+        workspace_abs = str(self.workspace_dir.resolve())
+        state_abs = str(self.state_dir.resolve())
+        result = self._run_agent(
+            agent_key="evaluator",
+            prompt=f"Run full application QA\n\nWorkspace directory: {workspace_abs}\nState directory: {state_abs}\nWrite QA results to: {state_abs}/final_qa.json",
+        )
 
         qa_path = self.state_dir / "final_qa.json"
         qa_path.write_text(

@@ -16,3 +16,10 @@ learning:
   retention:
     pattern_decay_days: 180
     project_history_keep: 50
+
+  # Governance: require approval before knowledge takes effect
+  # When true: new patterns/antipatterns start as "pending"
+  # Only "approved" items get injected into Agent prompts
+  # Team lead uses: agentforge pending / approve / reject
+  governance:
+    require_approval: false    # Set to true for strict team management

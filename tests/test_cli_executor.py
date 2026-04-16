@@ -9,7 +9,7 @@ class TestCLIExecutor:
     def test_build_command_basic(self):
         executor = CLIExecutor()
         cmd = executor._build_command(prompt="Do something", model="opus", allowed_tools=["Read", "Write"], max_turns=20)
-        assert "claude" in cmd
+        assert "claude" in cmd[0].lower()  # Full path contains 'claude'
         assert "--print" in cmd
         assert "--model" in cmd
         idx = cmd.index("--model")

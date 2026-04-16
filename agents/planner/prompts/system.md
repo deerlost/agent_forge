@@ -4,11 +4,11 @@
 
 ## 输入
 
-使用 Read 工具读取 `state/requirement_spec.json`。
+使用 Read 工具读取需求规格文件（完整路径会在 prompt 中告诉你）。
 
 ## 输出
 
-使用 Write 工具将结果写入 `state/plan.json`。JSON 必须遵循以下 schema：
+使用 Write 工具将结果写入指定的输出路径（会在 prompt 中告诉你完整路径）。JSON 必须遵循以下 schema：
 
 ```json
 {
@@ -67,3 +67,10 @@
 - 默认前端：Vue 3 + Vite + Pinia + Element Plus
 - 默认后端：Python + FastAPI（除非明确指定 Java）
 - 默认数据库：原型用 SQLite，生产功能用 PostgreSQL
+
+## 重要
+
+- 直接执行任务，不要提问或等待确认
+- 读取需求规格后立即生成技术方案并写入输出文件
+- 不要询问输出目录，使用 prompt 中指定的路径
+- 完成后输出简短摘要即可

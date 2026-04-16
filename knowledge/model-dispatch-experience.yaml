@@ -1,0 +1,47 @@
+# 从 model-dispatch 项目中提取的经验
+# 导入命令: agentforge import-rules knowledge/model-dispatch-experience.yaml --profile web-app
+
+patterns:
+  # 后端架构模式
+  - pattern: "使用 Handler 模式分离不同 API 提供商的调用逻辑（每个提供商一个独立文件）"
+    agent: api
+  - pattern: "配置文件支持 config.json + config.example.json 双文件模式（实际配置不入库，示例配置入库）"
+    agent: api
+  - pattern: "API Key 通过配置文件管理，不硬编码在代码中"
+    agent: api
+  - pattern: "异步任务使用 轮询模式（前端定时查询任务状态），适合文生图/视频等长耗时任务"
+    agent: api
+  - pattern: "线程锁保护共享的内存任务存储（TASKS_LOCK = threading.Lock()）"
+    agent: api
+  - pattern: "禁用系统代理环境变量避免 SSL 错误（os.environ.pop HTTP_PROXY 等）"
+    agent: api
+
+  # 前端模式
+  - pattern: "API 调用封装为统一的 api() 函数，自动处理 HTTP 错误和业务错误码"
+    agent: ui
+  - pattern: "使用 localStorage 持久化用户配置和历史记录"
+    agent: ui
+  - pattern: "定义 DEFAULT_MODELS 作为后端 /api/models 不可用时的 fallback"
+    agent: ui
+  - pattern: "轮询任务状态时设置最大次数上限防止无限轮询（MAX_POLL_COUNT = 200）"
+    agent: ui
+
+  # 架构模式
+  - pattern: "前后端分离架构，后端代理外部 API 调用隐藏 API Key，前端只与自己的后端通信"
+    agent: api
+  - pattern: "API 响应统一格式 {code, data, error}，前端统一解析"
+    agent: api
+
+antipatterns:
+  - antipattern: "使用 Python 内置 http.server 处理复杂 API 路由"
+    fix: "复杂项目应使用 FastAPI 或 Flask，http.server 只适合极简场景"
+    agent: api
+  - antipattern: "任务数据仅存内存（TASKS 字典），服务重启后丢失"
+    fix: "使用 SQLite 或 Redis 持久化任务状态"
+    agent: api
+  - antipattern: "前端使用 CDN 引入 Vue 而非 npm 项目化管理"
+    fix: "正式项目应使用 Vite + Vue3 项目脚手架，便于组件拆分和类型检查"
+    agent: ui
+  - antipattern: "所有前端逻辑写在一个 app.js 文件中"
+    fix: "按功能拆分为独立组件/模块，单文件不超过 200 行"
+    agent: ui

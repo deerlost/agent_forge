@@ -1,0 +1,9 @@
+auto:
+  application:
+    default-version:
+      - v1
+      - v2
+    interceptor:
+      sign-verify:
+        path-patterns:
+          - /v**/openId/**

@@ -1,0 +1,31 @@
+spring:
+  application:
+    name: ai-agent-web
+  jackson:
+    default-property-inclusion: non_null
+
+  cloud:
+    nacos:
+      server-addr: ${nacos.server-addr:172.31.87.134:8848}
+      password: ${nacos.password:App1234!@#$}
+      config:
+        namespace: ${nacos.config.ns:auto-base}
+        group: ${nacos.config.group:base}
+        server-addr: ${nacos.config.server-addr:${spring.cloud.nacos.server-addr}}
+        username: ${nacos.config.username:${spring.cloud.nacos.username:auto-base-client}}
+        password: ${nacos.config.password:${spring.cloud.nacos.password}}
+        enabled: false
+      discovery:
+        namespace: ${nacos.discovery.ns:auto-rpc}
+        group: ${nacos.discovery.group:default}
+        server-addr: ${nacos.discovery.server-addr:${spring.cloud.nacos.server-addr}}
+        username: ${nacos.discovery.username:${spring.cloud.nacos.username:auto-rpc-client}}
+        password: ${nacos.discovery.password:${spring.cloud.nacos.password}}
+
+server:
+  port: 8081
+  servlet:
+    context-path: /webapi
+    encoding:
+      force: true
+      charset: UTF-8
