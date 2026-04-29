@@ -1,10 +1,85 @@
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from pydantic import BaseModel, Field
 
 logger = logging.getLogger(__name__)
+
+
+# ─── 轻量关键词提取（零外部依赖）───
+
+_STOP_WORDS = frozenset({
+    "的", "了", "在", "是", "和", "与", "或", "不", "要", "有", "到", "为", "中",
+    "会", "可以", "需要", "必须", "使用", "通过", "进行", "如果", "但", "而",
+    "the", "a", "an", "is", "are", "in", "on", "for", "to", "and", "or", "not",
+    "with", "from", "by", "that", "this", "be", "do", "if", "but", "as", "at",
+})
+
+_SPLIT_RE = re.compile(r'[，。、；：\s/→↔\-\+\(\)\[\]\{\}""''"""\n]+')
+_CJK_RE = re.compile(r'[\u4e00-\u9fff]+')
+_ENG_RE = re.compile(r'[a-z][a-z0-9_]*')
+
+
+def extract_tags(text: str) -> list[str]:
+    """从文本中提取关键词标签（中英文混合，零依赖）。
+
+    中文：按 2-4 字滑动窗口提取词组 + 完整短语
+    英文：按空格/符号分词
+    """
+    text_lower = text.lower()
+    tags = []
+
+    # 1. 先按分隔符拆成片段
+    segments = _SPLIT_RE.split(text_lower)
+
+    for seg in segments:
+        seg = seg.strip()
+        if not seg:
+            continue
+
+        # 2. 提取英文词
+        for m in _ENG_RE.finditer(seg):
+            word = m.group()
+            if len(word) >= 2 and word not in _STOP_WORDS:
+                tags.append(word)
+
+        # 3. 提取中文：完整短语 + 2-gram/3-gram
+        for m in _CJK_RE.finditer(seg):
+            phrase = m.group()
+            if len(phrase) >= 2:
+                tags.append(phrase)  # 完整短语
+            # 2-gram
+            for i in range(len(phrase) - 1):
+                bigram = phrase[i:i+2]
+                if bigram not in _STOP_WORDS:
+                    tags.append(bigram)
+            # 3-gram
+            for i in range(len(phrase) - 2):
+                trigram = phrase[i:i+3]
+                tags.append(trigram)
+
+    return list(dict.fromkeys(tags))  # 去重保序
+
+
+def compute_relevance(query_tags: list[str], item_tags: list[str]) -> float:
+    """计算查询标签与条目标签的相关性分数（Jaccard + 包含匹配）。"""
+    if not query_tags or not item_tags:
+        return 0.0
+    q_set = set(query_tags)
+    i_set = set(item_tags)
+    # 精确匹配
+    intersection = q_set & i_set
+    jaccard = len(intersection) / len(q_set | i_set) if (q_set | i_set) else 0.0
+    # 子串包含匹配（如查询"jsonb"匹配标签"jsonb动态列"）
+    contain_score = 0
+    for qt in q_set:
+        for it in i_set:
+            if qt in it or it in qt:
+                contain_score += 1
+    contain_ratio = contain_score / max(len(q_set), 1)
+    return jaccard * 0.6 + contain_ratio * 0.4
 
 
 class Pattern(BaseModel):
@@ -14,6 +89,7 @@ class Pattern(BaseModel):
     profile: str = ""
     frequency: int = 1
     score_impact: float = 0.0
+    tags: list[str] = Field(default_factory=list)  # 自动提取的关键词标签
     # Governance fields
     submitted_by: str = ""          # Who submitted this
     source_project: str = ""        # Which project it came from
@@ -29,6 +105,7 @@ class AntiPattern(BaseModel):
     agent: str = ""
     profile: str = ""
     frequency: int = 1
+    tags: list[str] = Field(default_factory=list)  # 自动提取的关键词标签
     # Governance fields
     submitted_by: str = ""
     source_project: str = ""
@@ -68,11 +145,74 @@ class KnowledgeBase:
             encoding="utf-8",
         )
 
+    def search(self, query: str, agent: str = "", profile: str = "", top_k: int = 10) -> dict:
+        """按任务描述语义检索相关的 pattern 和 antipattern。"""
+        query_tags = extract_tags(query)
+        if not query_tags:
+            return {"patterns": [], "antipatterns": []}
+
+        scored_patterns = []
+        for p in self._patterns:
+            if p.status != "approved":
+                continue
+            if agent and p.agent and p.agent != agent:
+                continue
+            if profile and p.profile and p.profile != profile:
+                continue
+            tags = p.tags or extract_tags(p.pattern + " " + p.context)
+            score = compute_relevance(query_tags, tags)
+            # frequency 加权
+            score *= (1 + 0.1 * min(p.frequency, 10))
+            if score > 0.05:
+                scored_patterns.append((score, p))
+
+        scored_antipatterns = []
+        for a in self._antipatterns:
+            if a.status != "approved":
+                continue
+            if agent and a.agent and a.agent != agent:
+                continue
+            if profile and a.profile and a.profile != profile:
+                continue
+            tags = a.tags or extract_tags(a.antipattern + " " + (a.fix or "") + " " + (a.consequence or ""))
+            score = compute_relevance(query_tags, tags)
+            score *= (1 + 0.1 * min(a.frequency, 10))
+            if score > 0.05:
+                scored_antipatterns.append((score, a))
+
+        scored_patterns.sort(key=lambda x: x[0], reverse=True)
+        scored_antipatterns.sort(key=lambda x: x[0], reverse=True)
+
+        return {
+            "patterns": [p for _, p in scored_patterns[:top_k]],
+            "antipatterns": [a for _, a in scored_antipatterns[:top_k]],
+        }
+
+    def rebuild_tags(self):
+        """为所有无 tags 的条目自动提取标签并保存。"""
+        changed = False
+        for p in self._patterns:
+            if not p.tags:
+                p.tags = extract_tags(p.pattern + " " + p.context)
+                changed = True
+        for a in self._antipatterns:
+            if not a.tags:
+                a.tags = extract_tags(a.antipattern + " " + (a.fix or "") + " " + (a.consequence or ""))
+                changed = True
+        if changed:
+            self._save_patterns()
+            self._save_antipatterns()
+            logger.info("Rebuilt tags for all knowledge items")
+
     def add_pattern(self, pattern: Pattern):
         now = datetime.utcnow().isoformat()
         if not pattern.created_at:
             pattern.created_at = now
         pattern.updated_at = now
+
+        # Auto-extract tags if not provided
+        if not pattern.tags:
+            pattern.tags = extract_tags(pattern.pattern + " " + pattern.context)
 
         # Auto-set status based on governance mode
         if self.require_approval and pattern.status != "approved":
@@ -100,6 +240,12 @@ class KnowledgeBase:
         if not antipattern.created_at:
             antipattern.created_at = now
         antipattern.updated_at = now
+
+        # Auto-extract tags if not provided
+        if not antipattern.tags:
+            antipattern.tags = extract_tags(
+                antipattern.antipattern + " " + (antipattern.fix or "") + " " + (antipattern.consequence or "")
+            )
 
         if self.require_approval and antipattern.status != "approved":
             antipattern.status = "pending"

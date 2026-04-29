@@ -761,5 +761,37 @@ def approve_all_cmd(knowledge_dir):
         click.echo("No pending items.")
 
 
+@main.command("rebuild-tags")
+@click.option("--knowledge-dir", default="knowledge", type=click.Path(), help="Knowledge directory")
+def rebuild_tags_cmd(knowledge_dir):
+    """为所有知识条目重建关键词标签索引。"""
+    kb = KnowledgeBase(Path(knowledge_dir))
+    kb.rebuild_tags()
+    total = len(kb._patterns) + len(kb._antipatterns)
+    click.echo(f"Rebuilt tags for {total} knowledge items.")
+
+
+@main.command("search-knowledge")
+@click.argument("query")
+@click.option("--knowledge-dir", default="knowledge", type=click.Path(), help="Knowledge directory")
+@click.option("--top-k", default=5, help="Max results")
+def search_knowledge_cmd(query, knowledge_dir, top_k):
+    """按任务描述语义检索相关经验。"""
+    kb = KnowledgeBase(Path(knowledge_dir))
+    results = kb.search(query, top_k=top_k)
+    if not results["patterns"] and not results["antipatterns"]:
+        click.echo("No matching knowledge found.")
+        return
+    if results["patterns"]:
+        click.echo("─── 推荐做法 ───")
+        for i, p in enumerate(results["patterns"], 1):
+            click.echo(f"  {i}. {p.pattern}")
+    if results["antipatterns"]:
+        click.echo("─── 避免做法 ───")
+        for i, a in enumerate(results["antipatterns"], 1):
+            fix = f" → {a.fix}" if a.fix else ""
+            click.echo(f"  {i}. ❌ {a.antipattern}{fix}")
+
+
 if __name__ == "__main__":
     main()

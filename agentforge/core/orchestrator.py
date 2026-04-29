@@ -273,12 +273,13 @@ class Orchestrator:
             else:
                 logger.warning(f"System prompt not found: {agent_config.prompt_file}")
 
-        # Inject learned experience into system prompt
+        # Inject learned experience into system prompt (semantic search by task context)
         if self.injector and system_prompt:
             agent_short = agent_key.split(".")[-1]  # "generators.ui" -> "ui"
             experience = self.injector.inject(
                 agent=agent_short,
                 profile=self.config.profile,
+                task_context=task_prompt or "",  # 用当前任务描述做语义检索
             )
             if experience:
                 system_prompt = system_prompt + "\n\n" + experience

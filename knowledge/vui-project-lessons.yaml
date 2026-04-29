@@ -90,3 +90,26 @@ antipatterns:
   - antipattern: "每个项目都要复制 config/agents/templates 目录到本地"
     fix: "使用 resource fallback 机制，自动从安装目录加载默认资源，本地只放覆盖项"
     agent: api
+
+  # ─── 2026-04-28 跨项目共享经验 ───
+
+  # 多会话协作模式
+  - pattern: "设计会话与编码会话分离：一个会话做需求对比/plan更新/生成change-guide，另一个会话到workspace目录按guide编码"
+    agent: api
+  - pattern: "用结构化的 change-guide 文件（冲突清单+改动文件表+代码示例+执行顺序）作为跨会话上下文传递介质，新会话读文件即可开工"
+    agent: api
+
+  # PRD→plan 转换质量
+  - antipattern: "PRD→plan 转换时丢失数据流方向：PRD 说'列表数据→生成节点图'，plan 写成'节点图→派生行数据'，导致整个模块架构反转"
+    fix: "转换 plan 时逐条对齐 PRD 的动词（'基于…生成'、'同步到'、'自动'），明确数据主从关系"
+    agent: api
+  - antipattern: "requirement_spec 更新到新版本后 plan 未同步，基于旧理解编码导致大面积返工"
+    fix: "每次 PRD/requirement_spec 更新后做一次全量对比（逐模块逐功能），生成差异清单再决定改动范围"
+    agent: api
+
+  # 数据库设计
+  - pattern: "看到'N'、'无上限'、'动态新增'关键词时，用 jsonb + 元数据表（field_def）管理动态列，不用固定列"
+    agent: api
+  - antipattern: "用固定列（condition1~4）覆盖'判断条件1…N，暂无上限'的需求，上线一天就作废改 jsonb"
+    fix: "需求分析阶段识别动态字段信号（用户可新增/无上限/自定义），直接走 jsonb 方案"
+    agent: api
