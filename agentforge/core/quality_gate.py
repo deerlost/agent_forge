@@ -19,6 +19,10 @@ SPEED_TIERS: dict[str, str] = {
     "prettier": "fast",
     "tsc": "medium",
     "mypy": "medium",
+    "checkstyle": "medium",
+    "ddd_layer_check": "medium",
+    "archunit": "slow",
+    "java_layer_check": "slow",
 }
 
 TIER_ORDER = ["fast", "medium", "slow"]
@@ -69,7 +73,25 @@ class QualityGate:
             from agentforge.checks.python_checks import MypyChecker
             self.checkers.append(MypyChecker(python_config.get("mypy", {})))
 
+        # Java checks
+        java_config = checks_config.get("java", {})
+        if java_config.get("checkstyle", {}).get("enabled", False):
+            from agentforge.checks.java import CheckstyleChecker
+            self.checkers.append(CheckstyleChecker(java_config.get("checkstyle", {})))
+
+        if java_config.get("archunit", {}).get("enabled", False):
+            from agentforge.checks.java import ArchUnitChecker
+            self.checkers.append(ArchUnitChecker(java_config.get("archunit", {})))
+
+        # Architecture checks
+        arch_config = checks_config.get("architecture", {})
+        if arch_config.get("enabled", False):
+            if arch_config.get("ddd_layer_check", False):
+                from agentforge.checks.architecture import PythonLayerChecker
+                self.checkers.append(PythonLayerChecker(arch_config))
+
         logger.info(f"Initialized {len(self.checkers)} quality checkers")
+
 
     def _group_by_tier(self) -> dict[str, list[BaseChecker]]:
         """Group checkers by speed tier."""

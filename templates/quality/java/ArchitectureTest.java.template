@@ -1,0 +1,36 @@
+package {{base_package}}.architecture;
+
+import com.tngtech.archunit.core.domain.JavaClasses;
+import com.tngtech.archunit.core.importer.ClassFileImporter;
+import com.tngtech.archunit.lang.ArchRule;
+import org.junit.jupiter.api.Test;
+
+import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
+import static com.tngtech.archunit.library.Architectures.layeredArchitecture;
+
+public class ArchitectureTest {
+    private final JavaClasses classes = new ClassFileImporter()
+        .importPackages("{{base_package}}");
+
+    @Test
+    public void domainLayerShouldNotDependOnInfrastructure() {
+        ArchRule rule = noClasses()
+            .that().resideInAPackage("..domain..")
+            .should().dependOnClassesThat().resideInAPackage("..infrastructure..");
+        rule.check(classes);
+    }
+
+    @Test
+    public void dddLayersShouldBeRespected() {
+        layeredArchitecture()
+            .layer("Domain").definedBy("..domain..")
+            .layer("Application").definedBy("..application..")
+            .layer("Infrastructure").definedBy("..infrastructure..")
+            .layer("Interfaces").definedBy("..interfaces..")
+            .whereLayer("Domain").mayNotAccessAnyLayer()
+            .whereLayer("Application").mayOnlyAccessLayers("Domain")
+            .whereLayer("Infrastructure").mayOnlyAccessLayers("Domain", "Application")
+            .whereLayer("Interfaces").mayOnlyAccessLayers("Application", "Domain")
+            .check(classes);
+    }
+}

@@ -47,3 +47,20 @@ quality_gate:
         enabled: true
         command: "mypy . --ignore-missing-imports"
 
+    java:
+      checkstyle:
+        enabled: true
+        command: "mvn checkstyle:check"
+        timeout: 120
+      archunit:
+        enabled: true
+        command: "mvn test -Dtest=ArchitectureTest"
+        timeout: 180
+
+    architecture:
+      enabled: true
+      ddd_layer_check: true
+      timeout: 60
+      domain_dir: "domain"
+      forbidden_imports: ["infrastructure"]
+

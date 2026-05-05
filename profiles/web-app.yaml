@@ -21,3 +21,9 @@ sprint_types:
   - frontend
   - backend
   - fullstack
+
+quality_checks:
+  frontend: [eslint, tsc, prettier]
+  backend_java: [checkstyle, archunit]
+  backend_python: [ruff, mypy]
+  architecture: [ddd_layer_check]
