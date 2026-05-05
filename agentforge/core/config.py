@@ -33,6 +33,12 @@ class CostConfig(BaseModel):
     warn_threshold: float = 150.0
 
 
+class QualityGateConfig(BaseModel):
+    enabled: bool = True
+    max_retries: int = 2
+    checks: dict[str, Any] = Field(default_factory=dict)
+
+
 class AppConfig(BaseModel):
     project_name: str = ""
     profile: str = ""
@@ -45,6 +51,7 @@ class AppConfig(BaseModel):
     requirement_review: RequirementReviewConfig = Field(default_factory=RequirementReviewConfig)
     timeouts: TimeoutsConfig = Field(default_factory=TimeoutsConfig)
     cost: CostConfig = Field(default_factory=CostConfig)
+    quality_gate: QualityGateConfig = Field(default_factory=QualityGateConfig)
     _agents_raw: dict[str, Any] = PrivateAttr(default_factory=dict)
 
     def get_agent_config(self, dotted_key: str) -> AgentConfig:
@@ -74,18 +81,18 @@ def load_config(config_dir: Path, project_config_path: Optional[Path] = None) ->
 
     defaults_data = {}
     if defaults_path.exists():
-        with open(defaults_path) as f:
+        with open(defaults_path, encoding="utf-8") as f:
             raw = yaml.safe_load(f) or {}
             defaults_data = raw.get("defaults", raw)
 
     orch_data = {}
     if orch_path.exists():
-        with open(orch_path) as f:
+        with open(orch_path, encoding="utf-8") as f:
             orch_data = yaml.safe_load(f) or {}
 
     agents_data = {}
     if agents_path.exists():
-        with open(agents_path) as f:
+        with open(agents_path, encoding="utf-8") as f:
             agents_data = yaml.safe_load(f) or {}
 
     merged = {}
@@ -94,6 +101,7 @@ def load_config(config_dir: Path, project_config_path: Optional[Path] = None) ->
     merged["requirement_review"] = orch_data.get("requirement_review", defaults_data.get("requirement_review", {}))
     merged["timeouts"] = orch_data.get("timeouts", {})
     merged["cost"] = defaults_data.get("cost", {})
+    merged["quality_gate"] = orch_data.get("quality_gate", {})
     merged["default_engine"] = agents_data.get("execution", {}).get("default_engine", "claude-cli")
 
     if project_config_path and project_config_path.exists():

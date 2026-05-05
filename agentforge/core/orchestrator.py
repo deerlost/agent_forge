@@ -10,6 +10,7 @@ from agentforge.core.context_manager import ContextManager
 from agentforge.core.cost_tracker import CostTracker
 from agentforge.core.human_gate import GateType, HumanGate
 from agentforge.core.profile import Profile, load_profile, load_profiles_from_string, merge_profiles
+from agentforge.core.quality_gate import QualityGate
 from agentforge.core.template_copier import TemplateCopier
 from agentforge.learning.extractor import Extractor
 from agentforge.learning.injector import KnowledgeInjector
@@ -78,6 +79,11 @@ class Orchestrator:
             self.knowledge_base = KnowledgeBase(knowledge_dir)
             self.injector = KnowledgeInjector(self.knowledge_base)
             logger.info(f"Learning engine initialized from {knowledge_dir}")
+
+        # Quality gate
+        qg_config = config.quality_gate.model_dump()
+        self.quality_gate = QualityGate(self.workspace_dir, qg_config)
+        logger.info(f"Quality gate initialized (enabled={config.quality_gate.enabled})")
 
         # Runtime state
         self.plan: Optional[dict] = None
@@ -512,6 +518,10 @@ class Orchestrator:
                 self.checkpoint_mgr.record_failure(f"Generator {gen_key} failed for {sprint_id}")
                 return False
 
+            # Run quality checks after Generator execution
+            if not self._run_quality_checks(sprint_id, gen_key):
+                return False
+
             for round_num in range(self.config.orchestrator.max_reviewer_rounds):
                 review_result = self._run_agent(
                     agent_key=f"reviewers.{reviewer_key}",
@@ -531,6 +541,64 @@ class Orchestrator:
                 if not gen_result.is_success:
                     self.checkpoint_mgr.record_failure(f"Generator {gen_key} fix failed for {sprint_id}")
                     return False
+
+        return True
+
+    def _run_quality_checks(self, sprint_id: str, gen_key: str) -> bool:
+        """Run quality checks after Generator execution.
+
+        Args:
+            sprint_id: Current sprint ID
+            gen_key: Generator key (e.g., "generators.ui")
+
+        Returns:
+            True if checks passed or max retries exhausted, False if should abort sprint
+        """
+        if not self.quality_gate.enabled:
+            return True
+
+        max_retries = self.config.quality_gate.max_retries
+        workspace_abs = str(self.workspace_dir.resolve())
+
+        for attempt in range(max_retries + 1):
+            logger.info(f"Running quality checks (attempt {attempt + 1}/{max_retries + 1})")
+
+            passed, results = self.quality_gate.run_checks()
+
+            if passed:
+                logger.info("All quality checks passed")
+                return True
+
+            # Format feedback for Generator
+            feedback = self.quality_gate.format_feedback(results)
+            logger.warning(f"Quality checks failed:\n{feedback}")
+
+            if attempt < max_retries:
+                logger.info(f"Asking Generator to fix issues (retry {attempt + 1}/{max_retries})")
+                fix_prompt = (
+                    f"Quality checks failed for sprint {sprint_id}. "
+                    f"Please fix the following issues:\n\n{feedback}\n\n"
+                    f"Workspace directory: {workspace_abs}"
+                )
+
+                fix_result = self._run_agent(
+                    agent_key=gen_key,
+                    prompt=fix_prompt,
+                    sprint_id=sprint_id,
+                )
+
+                if not fix_result.is_success:
+                    logger.error(f"Generator failed to fix quality issues")
+                    self.checkpoint_mgr.record_failure(
+                        f"Generator {gen_key} failed quality check fix for {sprint_id}"
+                    )
+                    return False
+            else:
+                logger.error(f"Quality checks failed after {max_retries} retries")
+                self.checkpoint_mgr.record_failure(
+                    f"Quality checks failed for {sprint_id} after {max_retries} retries"
+                )
+                return False
 
         return True
 

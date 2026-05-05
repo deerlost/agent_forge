@@ -16,3 +16,34 @@ timeouts:
   agent_max_minutes: 30
   sprint_max_minutes: 60
   total_max_hours: 8
+
+# ═══ Quality Gate (Computational Controls) ═══
+quality_gate:
+  enabled: true
+  max_retries: 2                    # 检查失败后 Generator 修复重试次数
+  fail_strategy: "feedback"         # feedback | block | warn
+  timeout_seconds: 60               # 单个检查器超时
+
+  checks:
+    frontend:
+      eslint:
+        enabled: true
+        command: "npx eslint . --ext .ts,.vue --format json"
+        fix_command: "npx eslint . --ext .ts,.vue --fix"
+      tsc:
+        enabled: true
+        command: "npx vue-tsc --noEmit"
+      prettier:
+        enabled: true
+        command: "npx prettier --check 'src/**/*.{ts,vue}'"
+        fix_command: "npx prettier --write 'src/**/*.{ts,vue}'"
+
+    python:
+      ruff:
+        enabled: true
+        command: "ruff check ."
+        fix_command: "ruff check . --fix"
+      mypy:
+        enabled: true
+        command: "mypy . --ignore-missing-imports"
+
