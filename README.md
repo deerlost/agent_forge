@@ -28,6 +28,7 @@ agentforge/
 │   │
 │   ├── core/                        # ═══ 编排引擎 ═══
 │   │   ├── orchestrator.py          # 状态机：驱动 Sprint 循环（分析→规划→生成→评审→测试）
+│   │   ├── quality_gate.py          # 质量门控引擎：编排确定性检查（lint/type/arch）
 │   │   ├── cli_executor.py          # Claude Code CLI 子进程执行器（stdin 传 prompt，UTF-8 编码）
 │   │   ├── config.py                # AppConfig 配置加载（agentforge.yaml + CLI 参数 + defaults）
 │   │   ├── context_manager.py       # 上下文管理（Sprint 间 handoff JSON 传递状态）
@@ -38,6 +39,13 @@ agentforge/
 │   │   ├── resources.py             # 资源路径解析器（CWD → 安装目录 fallback，空目录跳过）
 │   │   ├── template_copier.py       # 项目模板复制器
 │   │   └── plugin_registry.py       # 插件注册（预留扩展点）
+│   │
+│   ├── checks/                      # ═══ 质量检查器（OpenAI Harness Engineering） ═══
+│   │   ├── base.py                  # CheckResult 模型 + BaseChecker 抽象类
+│   │   ├── frontend.py              # 前端检查器：ESLint + TypeScript + Prettier
+│   │   ├── python_checks.py         # Python 检查器：Ruff + Mypy
+│   │   ├── java.py                  # Java 检查器：Checkstyle + ArchUnit
+│   │   └── architecture.py          # 架构检查器：DDD 分层校验（Python AST + ArchUnit）
 │   │
 │   ├── learning/                    # ═══ 自学习引擎 ═══
 │   │   ├── knowledge_base.py        # 知识库：Pattern/AntiPattern 模型 + tags 索引 + 语义检索
@@ -71,7 +79,9 @@ agentforge/
 │   ├── ui/                          # 前端模板（Vue3 / React）
 │   ├── api/                         # 后端模板（FastAPI / Spring Boot）
 │   ├── java/                        # Java 项目模板（Maven 多模块 + DDD）
-│   └── infra/                       # 基础设施模板（Docker Compose / K8s）
+│   ├── infra/                       # 基础设施模板（Docker Compose / K8s）
+│   └── quality/                     # 质量检查模板
+│       └── java/                    # ArchUnit 测试模板（DDD 分层校验）
 │
 ├── knowledge/                       # 自学习知识库（本地文件存储）
 │   ├── patterns.json                # 推荐做法（含 tags 索引，语义检索用）
@@ -100,11 +110,19 @@ PRD ─→ Analyst（需求分析）─→ Planner（架构规划）
               │(代码生成) │◄────────│ (patterns +  │
               └────┬─────┘  注入    │ antipatterns)│
                    │     top-K 经验 │              │
-              ┌────▼─────┐         │  search()    │
-              │Reviewer  │         │  按任务语义   │
-              │(代码评审) │         │  检索相关经验 │
-              └────┬─────┘         └──────┬───────┘
-                   │                      ▲
+                   │                │  search()    │
+              ┌────▼─────┐         │  按任务语义   │
+              │Quality   │         │  检索相关经验 │
+              │Gate      │         └──────┬───────┘
+              │(确定性   │                ▲
+              │ 检查)    │                │
+              └────┬─────┘                │
+                   │                      │
+              ┌────▼─────┐                │
+              │Reviewer  │                │
+              │(AI评审)  │                │
+              └────┬─────┘                │
+                   │                      │
               ┌────▼─────┐                │
               │Evaluator │     提取经验    │
               │(集成测试) │───────────────┘
@@ -128,8 +146,48 @@ PRD ─→ Analyst（需求分析）─→ Planner（架构规划）
 |------|------|
 | GAN 式分离 | Generator 不评审自己，配独立 Reviewer + Evaluator |
 | Sprint 驱动 | 每个 Sprint 结束清空上下文，handoff JSON 传递状态 |
+| 质量门控 | Generator 后立即运行确定性检查（lint/type/arch），失败反馈修复 |
 | 断点恢复 | 任意时刻可中断，`agentforge resume` 从 checkpoint 继续 |
 | 资源 Fallback | 项目目录 → 安装目录自动查找 config/agents/templates |
+
+### 质量控制机制（OpenAI Harness Engineering 集成）
+
+**三层检查体系**：
+
+| 层次 | 检查类型 | 工具 | 速度 | 说明 |
+|------|---------|------|------|------|
+| **Computational Controls** | Lint + Format | ESLint, Ruff, Checkstyle, Prettier | Fast (60s) | 代码风格、语法错误 |
+| **Computational Controls** | Type Check | TypeScript, Mypy | Medium (60s) | 类型安全 |
+| **Architecture Fitness** | 分层校验 | Python AST, ArchUnit | Medium (60-180s) | DDD 依赖方向、模块边界 |
+
+**工作流程**：
+
+```
+Generator 生成代码
+    ↓
+Fast 检查（lint + format）← 失败立即停止，反馈 Generator
+    ↓ 通过
+Medium 检查（type check + 架构）← 失败反馈 Generator
+    ↓ 通过
+Reviewer AI 评审 ← 失败反馈 Generator
+    ↓ 通过
+Evaluator 集成测试
+```
+
+**支持的检查器**：
+
+| 技术栈 | 检查器 | 配置位置 |
+|--------|--------|---------|
+| **前端** | ESLint, TypeScript, Prettier | `config/orchestrator.yaml` → `quality_gate.checks.frontend` |
+| **Python** | Ruff, Mypy | `quality_gate.checks.python` |
+| **Java** | Checkstyle, ArchUnit | `quality_gate.checks.java` |
+| **架构** | Python AST, ArchUnit | `quality_gate.checks.architecture` |
+
+**关键特性**：
+- **Fail-fast 语义**：Fast 检查失败立即停止，不浪费时间跑后续检查
+- **自动修复提示**：检查失败时格式化错误为 Agent 可读的反馈
+- **重试机制**：Generator 根据反馈修复问题，最多重试 2 次
+- **零外部依赖**：通过 subprocess 执行工具命令，不依赖 Claude CLI
 
 ### 自学习引擎
 
